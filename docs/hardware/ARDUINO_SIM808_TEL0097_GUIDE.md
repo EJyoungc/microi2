@@ -41,21 +41,24 @@ The TEL0097 shield has a 3-position physical slide switch labeled **Function Swi
 
 ## 3. Microi API Integration Contract
 
-The firmware automatically formats and sends HTTP POST telemetry requests to:
-* **Endpoint:** `http://micro.micromek.net/api/v1/device/telemetry`
+The firmware utilizes the official **`DFRobot_sim808`** library to:
+1. Power up GPS: `sim808.attachGPS()` and parse with `sim808.getGPS()`.
+2. Connect GPRS & TCP: `sim808.join(F("internet"))` and `sim808.connect(TCP, "microi.micromek.net", 80)`.
+3. Dispatch HTTP/1.1 POST telemetry requests:
+* **Endpoint:** `http://microi.micromek.net/api/v1/device/telemetry`
 * **Method:** `POST`
 * **Header:** `Content-Type: application/json`
 * **Payload Structure:**
 ```json
 {
   "device_id": "MEK-SIM808-01",
-  "api_key": "your-device-api-key",
+  "api_key": "MEK_9GHVCK5ROYFIWGCR7ZTQB5AA",
   "latitude": -15.786111,
   "longitude": 35.005833,
   "altitude": 1045.2,
   "speed": 12.5,
   "heading": 180.0,
-  "recorded_at": "2026-10-12T15:30:22Z"
+  "recorded_at": "2026-10-13T12:30:22Z"
 }
 ```
 
