@@ -54,8 +54,8 @@ const char DEVICE_KEY[] PROGMEM  = "MEK_9GHVCK5ROYFIWGCR7ZTQB5AA";
 // Cellular APN (Malawi Airtel / TNM: "internet")
 const char CELLULAR_APN[] PROGMEM = "internet";
 
-// Microi Ingestion API Target
-const char SERVER_URL[] PROGMEM   = "http://microi.micromek.net/api/v1/device/telemetry";
+// Microi Ingestion API Target (Hostinger requires HTTPS)
+const char SERVER_URL[] PROGMEM   = "https://microi.micromek.net/api/v1/device/telemetry";
 
 // Cadence: Every 3 minutes (180,000 milliseconds)
 const unsigned long TRACKING_INTERVAL_MS = 180000UL;
@@ -342,17 +342,22 @@ bool transmitTelemetryHTTP() {
     return false;
   }
 
-  // 7. Execute HTTP GET (Method 0 = GET)
+  // 7. Enable SSL / HTTPS mode (and bypass strict cert validation for IoT cellular)
+  sendAT_P(PSTR("AT+HTTPSSL=1"), "OK", 1500);
+  sendAT_P(PSTR("AT+SSLOPT=0,1"), "OK", 1000);
+
+  // 8. Execute HTTP GET (Method 0 = GET)
   flushSerialRx();
   Serial.println(F("AT+HTTPACTION=0"));
 
-  // Wait up to 15s for +HTTPACTION: 0,<status_code>,<data_len>
+  // Wait up to 20s for +HTTPACTION: 0,<status_code>,<data_len>
   unsigned long start = millis();
   bool success = false;
 
-  while (millis() - start < 15000) {
+  while (millis() - start < 20000) {
     if (Serial.available()) {
       String line = Serial.readStringUntil('\n');
+      Serial.println(line); // Echo back +HTTPACTION so user sees exact status code
       if (line.indexOf(F("+HTTPACTION: 0,")) >= 0) {
         int firstComma = line.indexOf(',');
         int secondComma = line.indexOf(',', firstComma + 1);
@@ -367,7 +372,10 @@ bool transmitTelemetryHTTP() {
     }
   }
 
-  // 8. Clean up HTTP session and close GPRS bearer
+  // 9. Read server response if successful or informative
+  sendAT_P(PSTR("AT+HTTPREAD"), "OK", 3000);
+
+  // 10. Clean up HTTP session and close GPRS bearer
   sendAT_P(PSTR("AT+HTTPTERM"), "OK", 1000);
   sendAT_P(PSTR("AT+SAPBR=0,1"), "OK", 2000);
 
