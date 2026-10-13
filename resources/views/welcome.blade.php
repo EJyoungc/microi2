@@ -6,7 +6,9 @@
         <title>Microi — Multi-Tenant GPS Vehicle Tracking by MicroMek</title>
         <link rel="icon" href="/favicon.ico" sizes="any">
         @fonts
-        @vite(['resources/css/app.css', 'resources/js/app.js'])
+        {{-- @vite(['resources/css/app.css', 'resources/js/app.js']) --}}
+        <link rel="stylesheet" href="{{ asset('build/assets/app-4sMayH_F.css') }}">
+        <script type="module" src="{{ asset('build/assets/app-DzckNJH.js') }}"></script>
     </head>
     <body class="bg-slate-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 antialiased font-sans selection:bg-emerald-500 selection:text-white">
         <!-- Navigation Bar -->
@@ -106,7 +108,7 @@
                             <div class="mt-3 relative rounded-2xl overflow-hidden bg-slate-900 h-80 flex flex-col justify-between p-4 text-white">
                                 <!-- Mock Map Visual -->
                                 <div class="absolute inset-0 opacity-40 bg-[radial-gradient(#10b981_1px,transparent_1px)] [background-size:16px_16px]"></div>
-                                
+
                                 <div class="relative z-10 flex justify-between items-start">
                                     <div class="bg-black/60 backdrop-blur-md p-3 rounded-xl border border-white/10 text-xs">
                                         <div class="font-bold text-emerald-400 font-mono">BW 4492 • Apex Van 1</div>
