@@ -54,8 +54,8 @@ const char DEVICE_KEY[] PROGMEM  = "MEK_9GHVCK5ROYFIWGCR7ZTQB5AA";
 // Cellular APN (Malawi Airtel / TNM: "internet")
 const char CELLULAR_APN[] PROGMEM = "internet";
 
-// Microi Ingestion API Target (Hostinger requires HTTPS)
-const char SERVER_URL[] PROGMEM   = "https://microi.micromek.net/api/v1/device/telemetry";
+// HTTP Relay Gateway on bluecoregames.com (relays plain HTTP to https://microi.micromek.net)
+const char SERVER_URL[] PROGMEM   = "http://bluecoregames.com/telemetry_relay.php";
 
 // Cadence: Every 3 minutes (180,000 milliseconds)
 const unsigned long TRACKING_INTERVAL_MS = 180000UL;
@@ -342,11 +342,7 @@ bool transmitTelemetryHTTP() {
     return false;
   }
 
-  // 7. Enable SSL / HTTPS mode (and bypass strict cert validation for IoT cellular)
-  sendAT_P(PSTR("AT+HTTPSSL=1"), "OK", 1500);
-  sendAT_P(PSTR("AT+SSLOPT=0,1"), "OK", 1000);
-
-  // 8. Execute HTTP GET (Method 0 = GET)
+  // 7. Execute HTTP GET to relay (Method 0 = GET)
   flushSerialRx();
   Serial.println(F("AT+HTTPACTION=0"));
 
