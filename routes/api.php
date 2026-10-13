@@ -10,6 +10,6 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::prefix('v1/device')->group(function () {
-    Route::post('/telemetry', [DeviceTelemetryController::class, 'ingest'])->name('api.v1.device.telemetry');
-    Route::post('/heartbeat', [DeviceTelemetryController::class, 'heartbeat'])->name('api.v1.device.heartbeat');
+    Route::match(['get', 'post'], '/telemetry', [DeviceTelemetryController::class, 'ingest'])->name('api.v1.device.telemetry');
+    Route::match(['get', 'post'], '/heartbeat', [DeviceTelemetryController::class, 'heartbeat'])->name('api.v1.device.heartbeat');
 });

@@ -5,50 +5,32 @@
  *   #include <DFRobot_sim808.h>
  *   DFRobot_SIM808 sim808(&Serial);
  *
- * Hardware:
- *   - Arduino Uno R3 (ATmega328P, 5V, 16MHz)
- *   - DFRobot SIM808 GPS/GPRS/GSM Shield (SKU: TEL0097)
- *   - Official DFRobot Docs: https://wiki.dfrobot.com/tel0097/
+ * Hardware Pin Mapping (TEL0097):
+ *   - D0 : RX (SIM808 TX)
+ *   - D1 : TX (SIM808 RX)
+ *   - D12: Power GPIO / PWRKEY (Pulse HIGH/LOW to power ON / OFF module programmatically)
+ *   - D2 : Optional Hardware SOS Button (to GND)
  *
- * Capabilities:
- *   1. DFRobot_sim808 Library Native Integration:
- *        - sim808.init()
- *        - sim808.attachGPS() / sim808.getGPS()
- *        - sim808.join(F("internet"))
- *        - sim808.connect(TCP, host, port)
- *        - sim808.send(http_cmd, length) / sim808.recv(buffer, length)
- *        - sim808.sendSMS(phone, msg)
- *        - sim808.callUp(phone) / sim808.hangup()
- *   2. Telemetry ingestion into Microi API endpoint:
- *        POST /api/v1/device/telemetry
- *        Host: microi.micromek.net
- *        Payload: {"device_id": "...", "api_key": "...", "latitude": ..., "longitude": ..., ...}
- *   3. SMS Location Query:
- *        - Incoming SMS commands "LOCATION" / "GPS" trigger an SMS reply with GPS coordinates & Google Maps link.
- *   4. Voice Call Trigger & Emergency (SOS Button on Pin D2):
- *        - Dials emergency contact on SOS button press.
+ * TEL0097 Function Switch:
+ *   [ None ]   : Disconnects serial pins -> MUST BE ON 'None' WHEN DOWNLOADING SKETCH!
+ *   [ Arduino ]: Connects SIM808 to Arduino (D0/D1) -> MOVE TO 'Arduino' TO RUN!
+ *   [ USB_DBG ]: Connects SIM808 to PC USB -> Use for direct AT command debugging!
  *
- * ===================================================================================
- * IMPORTANT TEL0097 HARDWARE SWITCH INSTRUCTIONS:
- *   The TEL0097 shield has a 3-position slide switch ("Function Switch"):
- *       [ None ]   : Disconnects RX/TX. (MUST BE IN THIS POSITION WHEN UPLOADING CODE!)
- *       [ Arduino ]: Connects SIM808 to Arduino Hardware Serial (Pins D0/RX & D1/TX).
- *       [ USB_DBG ]: Direct PC AT debug mode.
- *
- *   Steps to Run:
- *     1. Set switch to 'None' -> Click Upload in Arduino IDE.
- *     2. After upload completes -> Slide switch to 'Arduino' and power via 7-12V 2A DC barrel jack.
+ * Power LEDs:
+ *   - ON   : Power indicator (External 7-12V 2A DC supply required!)
+ *   - Net  : GSM signal (Fast flash = Searching | Slow flash 3s = Registered)
  * ===================================================================================
  */
 
 #include <Arduino.h>
-#include <DFRobot_sim808.h>
+#include <DFRobot_SIM808.h>
 
-// Instantiate the official DFRobot_SIM808 driver bound to Hardware Serial (Pins 0/1)
+// TEL0097 Occupied Pins
+#define SIM808_PWR_PIN 12    // Digital pin connected to SIM808 power GPIO
+#define SOS_BUTTON_PIN 2     // Optional emergency button (D2 to GND)
+
+// Instantiate the official DFRobot_SIM808 driver bound to Hardware Serial
 DFRobot_SIM808 sim808(&Serial);
-
-// Hardware SOS Emergency Button wired between Pin 2 and GND (Internal pull-up)
-#define SOS_BUTTON_PIN 2
 
 // ==============================================================================
 // CONFIGURATION & CREDENTIALS
@@ -58,7 +40,6 @@ const char DEVICE_ID[] PROGMEM   = "MEK-SIM808-01";
 const char DEVICE_KEY[] PROGMEM  = "MEK_9GHVCK5ROYFIWGCR7ZTQB5AA";
 
 // Cellular APN (Access Point Name)
-// Malawi: "internet" (Airtel / TNM) | Vodacom: "internet" | Safaricom: "safaricom"
 #define CELLULAR_APN "internet"
 
 // Microi Server Configuration
@@ -73,7 +54,7 @@ const char EMERGENCY_PHONE[] PROGMEM = "0995936887";
 const unsigned long TELEMETRY_INTERVAL_MS = 15000; // 15 seconds
 
 // ==============================================================================
-// GLOBAL STATE & REUSABLE BUFFER
+// GLOBAL STATE & BUFFER
 // ==============================================================================
 bool isGprsJoined = false;
 unsigned long lastTelemetryTime = 0;
@@ -83,6 +64,7 @@ unsigned long lastSmsCheckTime = 0;
 char networkBuffer[384];
 
 // Forward Declarations
+void powerOnSIM808();
 bool setupGPRS();
 bool sendTelemetryHTTP();
 void checkIncomingSMS();
@@ -94,25 +76,29 @@ void triggerSOSAlert();
 // ==============================================================================
 void setup() {
   pinMode(SOS_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(SIM808_PWR_PIN, OUTPUT);
 
   // Initialize hardware serial for SIM808 module (standard 9600 baud)
   Serial.begin(9600);
+
+  // 1. Programmatic Power-on pulse using Pin D12 (in case module is off)
+  powerOnSIM808();
   delay(3000);
 
-  // 1. Initialize SIM808 module
+  // 2. Initialize SIM808 module
   while (!sim808.init()) {
     delay(1000);
   }
 
-  // 2. Turn on GPS receiver power
+  // 3. Turn on GPS receiver power
   sim808.attachGPS();
 
-  // 3. Join GPRS network
+  // 4. Join GPRS cellular network
   setupGPRS();
 }
 
 // ==============================================================================
-// MAIN LOOP
+// MAIN RUN LOOP
 // ==============================================================================
 void loop() {
   unsigned long now = millis();
@@ -145,6 +131,19 @@ void loop() {
 }
 
 // ==============================================================================
+// HARDWARE POWER CONTROL (PIN D12)
+// ==============================================================================
+void powerOnSIM808() {
+  // Pin D12 short pulse (1.2 seconds) turns on the SIM808 module
+  digitalWrite(SIM808_PWR_PIN, LOW);
+  delay(100);
+  digitalWrite(SIM808_PWR_PIN, HIGH);
+  delay(1200);
+  digitalWrite(SIM808_PWR_PIN, LOW);
+  delay(2000);
+}
+
+// ==============================================================================
 // GPRS NETWORK SETUP
 // ==============================================================================
 bool setupGPRS() {
@@ -172,7 +171,6 @@ bool sendTelemetryHTTP() {
 
   // 1. Connect to Microi server via TCP Socket on port 80
   if (!sim808.connect(TCP, hostBuf, SERVER_PORT)) {
-    // If connection failed, reset GPRS flag so it rejoins next round
     isGprsJoined = false;
     sim808.close();
     return false;
@@ -241,7 +239,6 @@ bool sendTelemetryHTTP() {
 // SMS HANDLER & INTERACTIVE LOCATION REPLY
 // ==============================================================================
 void checkIncomingSMS() {
-  // Check if there are any unread messages on the SIM card
   char msgIndex = sim808.isSMSunread();
 
   if (msgIndex > 0) {
@@ -249,10 +246,8 @@ void checkIncomingSMS() {
     char senderPhone[20];
     char smsDate[24];
 
-    // Read the unread SMS
     sim808.readSMS(msgIndex, smsContent, sizeof(smsContent), senderPhone, smsDate);
 
-    // Convert message content to uppercase for command matching
     for (int i = 0; smsContent[i]; i++) {
       smsContent[i] = toupper(smsContent[i]);
     }
@@ -265,7 +260,6 @@ void checkIncomingSMS() {
       sim808.hangup();
     }
 
-    // Delete processed SMS to keep SIM card memory clean
     sim808.deleteSMS(msgIndex);
   }
 }
@@ -296,12 +290,10 @@ void triggerSOSAlert() {
   char phoneBuf[20];
   strcpy_P(phoneBuf, EMERGENCY_PHONE);
 
-  // Send emergency coordinates SMS
   sendLocationSMS(phoneBuf);
   delay(1000);
 
-  // Place emergency voice call
   sim808.callUp(phoneBuf);
-  delay(20000); // Let it ring 20 seconds
+  delay(20000); // Ring for 20 seconds
   sim808.hangup();
 }

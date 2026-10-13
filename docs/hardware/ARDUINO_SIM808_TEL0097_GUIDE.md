@@ -18,9 +18,12 @@ Official Hardware Documentation: [https://wiki.dfrobot.com/tel0097/](https://wik
 
 ---
 
-## 2. Onboard Function Switch (Crucial Step!)
+## 2. Onboard Function Switch (Zero Jumper Wires Needed)
 
-The TEL0097 shield has a 3-position physical slide switch labeled **Function Switch**:
+Because the TEL0097 shield is stacked directly on the Arduino Uno headers, **no jumper wires are required**:
+* **Hardware Serial (Pins D0/RX & D1/TX)** is hardwired directly to the SIM808 module.
+* **Pin D12** is hardwired directly to the SIM808 Power GPIO (PWRKEY).
+* The 3-position slide switch on the shield controls whether the Arduino is connected:
 
 ```
 +------------------------------------------+
@@ -28,14 +31,15 @@ The TEL0097 shield has a 3-position physical slide switch labeled **Function Swi
 +------------------------------------------+
 ```
 
-1. **`None` (Upload / Programming Mode):**
-   * Disconnects the SIM808 serial lines from the Arduino.
-   * **You MUST set the switch to `None` before clicking Upload in the Arduino IDE.** If you leave it on `Arduino`, the upload will fail with `avrdude: stk500_getsync()` error.
-2. **`Arduino` (Operation Mode):**
-   * Connects the SIM808 module's TX/RX directly to Arduino Hardware Serial (`D0` / `D1`).
-   * **After the sketch uploads successfully**, flip the switch to **`Arduino`** and press the Arduino Reset button.
-3. **`USB_DBG` (Direct PC AT Debug Mode):**
-   * Connects the SIM808 directly to the onboard USB port for manual AT command debugging with a serial monitor.
+### 2-Step Operating Procedure:
+1. **Upload Code:**
+   * Slide the switch to **`None`**.
+   * Plug in the USB cable and click **Upload** in the Arduino IDE.
+   *(Position `None` disconnects the serial lines so the USB flashing doesn't conflict).*
+2. **Run the Device:**
+   * Once uploading finishes and displays *Done uploading*, slide the switch to **`Arduino`**.
+   * Connect an external **9V–12V 2A DC power supply** to the Arduino barrel jack.
+   *(Position `Arduino` connects Pins D0 & D1 directly to the SIM808 module).*
 
 ---
 
