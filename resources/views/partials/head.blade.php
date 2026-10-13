@@ -11,10 +11,5 @@
 
 @fonts
 
-{{-- @vite(['resources/css/app.css', 'resources/js/app.js']) --}}
-<link rel="stylesheet" href="{{ asset('build/assets/app-4sMayH_F.css') }}">
-<link rel="stylesheet" href="{{ asset('build/assets/fonts-C9MNnjVw.css ') }}">
-
-<script type="module" src="{{ asset('build/assets/app-DzckNJh_.js') }}"></script>
-<script type="module" src="{{ asset('build/assets/passkeys-ZWACIUjA.js') }}"></script>
+@vite(['resources/css/app.css', 'resources/js/app.js'])
 @fluxAppearance
