@@ -2,6 +2,7 @@
 
 namespace App\Http\Responses\Concerns;
 
+use App\Enums\TeamRole;
 use App\Models\Team;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\URL;
@@ -23,9 +24,22 @@ trait RedirectsToCurrentTeam
 
         abort_if(! $user, 403);
 
-        $team = $user->currentTeam ?? $user->personalTeam();
+        $team = $user->currentTeam ?? $user->personalTeam() ?? $user->teams()->first();
 
-        abort_if(! $team, 403);
+        if (! $team) {
+            $team = Team::create([
+                'name' => $user->name."'s Fleet",
+                'is_personal' => true,
+                'status' => 'approved',
+                'created_by' => $user->id,
+            ]);
+            $team->members()->attach($user, ['role' => TeamRole::Owner->value]);
+        }
+
+        if ($user->current_team_id !== $team->id) {
+            $user->update(['current_team_id' => $team->id]);
+            $user->setRelation('currentTeam', $team);
+        }
 
         return $team;
     }

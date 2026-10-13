@@ -3,8 +3,8 @@
     <head>
         @include('partials.head')
     </head>
-    <body class="min-h-screen bg-white dark:bg-zinc-800">
-        <flux:sidebar sticky collapsible="mobile" class="border-e border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900">
+    <body class="min-h-screen bg-slate-50/80 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 antialiased font-sans selection:bg-emerald-500 selection:text-white">
+        <flux:sidebar sticky collapsible="mobile" class="border-e border-slate-200/80 bg-white/95 dark:border-zinc-800 dark:bg-zinc-900/95 backdrop-blur-md">
             <flux:sidebar.header>
                 <x-app-logo :sidebar="true" href="{{ route('dashboard') }}" wire:navigate />
                 <flux:sidebar.collapse class="lg:hidden" />
@@ -13,24 +13,52 @@
             <livewire:team-switcher />
 
             <flux:sidebar.nav>
-                <flux:sidebar.group :heading="__('Platform')" class="grid">
+                <flux:sidebar.group :heading="__('Fleet & Tracking')" class="grid">
                     <flux:sidebar.item icon="home" :href="route('dashboard')" :current="request()->routeIs('dashboard')" wire:navigate>
-                        {{ __('Dashboard') }}
+                        {{ __('Overview') }}
+                    </flux:sidebar.item>
+                    <flux:sidebar.item icon="map" :href="route('tracking')" :current="request()->routeIs('tracking')" wire:navigate>
+                        {{ __('Live Tracking Map') }}
+                    </flux:sidebar.item>
+                    <flux:sidebar.item icon="clock" :href="route('history')" :current="request()->routeIs('history')" wire:navigate>
+                        {{ __('History Playback') }}
+                    </flux:sidebar.item>
+                    <flux:sidebar.item icon="truck" :href="route('vehicles')" :current="request()->routeIs('vehicles')" wire:navigate>
+                        {{ __('Vehicles & Fleet') }}
                     </flux:sidebar.item>
                 </flux:sidebar.group>
+
+                @if (auth()->user()?->isMicroMekStaff())
+                    <flux:sidebar.group :heading="__('MicroMek Admin')" class="grid mt-4">
+                        <flux:sidebar.item icon="cpu-chip" :href="route('admin.devices')" :current="request()->routeIs('admin.devices')" wire:navigate>
+                            {{ __('GPS Hardware') }}
+                        </flux:sidebar.item>
+                        <flux:sidebar.item icon="inbox-arrow-down" :href="route('admin.requests')" :current="request()->routeIs('admin.requests')" wire:navigate>
+                            {{ __('Device Requests') }}
+                        </flux:sidebar.item>
+                        <flux:sidebar.item icon="building-office-2" :href="route('admin.organizations')" :current="request()->routeIs('admin.organizations')" wire:navigate>
+                            {{ __('Organizations') }}
+                        </flux:sidebar.item>
+                        <flux:sidebar.item icon="users" :href="route('admin.users')" :current="request()->routeIs('admin.users')" wire:navigate>
+                            {{ __('User Directory') }}
+                        </flux:sidebar.item>
+                    </flux:sidebar.group>
+                @endif
             </flux:sidebar.nav>
 
             <flux:spacer />
 
-            <flux:sidebar.nav>
-                <flux:sidebar.item icon="folder-git-2" href="https://github.com/laravel/livewire-starter-kit" target="_blank">
-                    {{ __('Repository') }}
-                </flux:sidebar.item>
-
-                <flux:sidebar.item icon="book-open-text" href="https://laravel.com/docs/starter-kits#livewire" target="_blank">
-                    {{ __('Documentation') }}
-                </flux:sidebar.item>
-            </flux:sidebar.nav>
+            <div class="px-3 py-2 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-xs text-zinc-500">
+                <span class="in-data-flux-sidebar-collapsed-desktop:hidden font-medium">Theme Mode</span>
+                <flux:button 
+                    size="sm" 
+                    variant="ghost" 
+                    icon="moon" 
+                    x-data 
+                    @click="$flux.appearance = $flux.appearance === 'dark' ? 'light' : 'dark'" 
+                    title="Toggle Dark / Light Mode"
+                />
+            </div>
 
             <x-desktop-user-menu class="hidden lg:block" :name="auth()->user()->name" />
         </flux:sidebar>
@@ -101,5 +129,6 @@
         @endpersist
 
         @fluxScripts
+        @stack('scripts')
     </body>
 </html>
