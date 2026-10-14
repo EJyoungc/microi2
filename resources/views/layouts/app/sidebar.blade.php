@@ -26,6 +26,19 @@
                     <flux:sidebar.item icon="truck" :href="route('vehicles')" :current="request()->routeIs('vehicles')" wire:navigate>
                         {{ __('Vehicles & Fleet') }}
                     </flux:sidebar.item>
+                    @php
+                        $userCurrentTeam = auth()->user()?->currentTeam;
+                        $canManageTeam = $userCurrentTeam && ! $userCurrentTeam->is_personal && (
+                            auth()->user()?->ownsTeam($userCurrentTeam) || 
+                            auth()->user()?->teamRole($userCurrentTeam) === \App\Enums\TeamRole::Admin ||
+                            auth()->user()?->isSuperAdmin()
+                        );
+                    @endphp
+                    @if ($canManageTeam)
+                        <flux:sidebar.item icon="user-group" :href="route('teams.edit', ['team' => $userCurrentTeam->slug])" :current="request()->routeIs('teams.edit')" wire:navigate>
+                            {{ __('Team Members & Invites') }}
+                        </flux:sidebar.item>
+                    @endif
                 </flux:sidebar.group>
 
                 @if (auth()->user()?->isMicroMekStaff())

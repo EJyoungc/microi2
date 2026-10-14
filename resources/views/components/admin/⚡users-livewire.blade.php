@@ -1,9 +1,14 @@
 <?php
 
 use App\Models\AuditLog;
+use App\Models\Team;
 use App\Models\User;
+use App\Notifications\PlatformUserInvitation;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -22,6 +27,18 @@ new class extends Component {
     public string $email = '';
     public string $systemRole = 'customer';
     public bool $isActive = true;
+
+    // Create / Invite User Modal
+    public bool $showCreateModal = false;
+    public string $newUserName = '';
+    public string $newUserEmail = '';
+    public string $newUserPhone = '';
+    public string $newUserRole = 'customer';
+    public string $newUserAccountType = 'individual';
+    public ?int $newUserTeamId = null;
+    public string $newUserTeamRole = 'member';
+    public string $newUserPassword = '';
+    public bool $sendInviteEmail = true;
 
     public function boot(): void
     {
@@ -46,6 +63,107 @@ new class extends Component {
             ->with(['currentTeam'])
             ->latest()
             ->paginate(15);
+    }
+
+    #[Computed]
+    public function organizations()
+    {
+        return Team::where('is_personal', false)->orderBy('name')->get();
+    }
+
+    public function openCreateUser(): void
+    {
+        $this->reset([
+            'newUserName',
+            'newUserEmail',
+            'newUserPhone',
+            'newUserRole',
+            'newUserAccountType',
+            'newUserTeamId',
+            'newUserTeamRole',
+            'newUserPassword',
+        ]);
+        $this->newUserRole = 'customer';
+        $this->newUserAccountType = 'individual';
+        $this->newUserTeamRole = 'member';
+        $this->sendInviteEmail = true;
+        $this->showCreateModal = true;
+    }
+
+    public function createUser(): void
+    {
+        if (! Auth::user()->isSuperAdmin() && $this->newUserRole === 'super_admin') {
+            Flux::toast(variant: 'danger', text: __('Only super administrators can assign the super admin role.'));
+            return;
+        }
+
+        $validated = $this->validate([
+            'newUserName' => ['required', 'string', 'max:255'],
+            'newUserEmail' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
+            'newUserPhone' => ['nullable', 'string', 'max:50'],
+            'newUserRole' => ['required', 'string', Rule::in(['customer', 'micromek_staff', 'super_admin'])],
+            'newUserAccountType' => ['required', 'string', Rule::in(['individual', 'organization'])],
+            'newUserTeamId' => ['nullable', 'integer', 'exists:teams,id'],
+            'newUserTeamRole' => ['required', 'string', Rule::in(['admin', 'member'])],
+            'newUserPassword' => ['nullable', 'string', 'min:8'],
+        ]);
+
+        $plainPassword = ! empty($validated['newUserPassword'])
+            ? $validated['newUserPassword']
+            : Str::password(12, letters: true, numbers: true, symbols: false);
+
+        DB::transaction(function () use ($validated, $plainPassword) {
+            $user = User::create([
+                'name' => $validated['newUserName'],
+                'email' => $validated['newUserEmail'],
+                'password' => $plainPassword,
+                'phone_number' => $validated['newUserPhone'] ?: null,
+                'system_role' => $validated['newUserRole'],
+                'account_type' => $validated['newUserAccountType'],
+                'onboarding_completed' => true,
+                'is_active' => true,
+            ]);
+
+            $user->email_verified_at = now();
+            $user->save();
+
+            $teamName = null;
+            if (! empty($validated['newUserTeamId'])) {
+                $team = Team::find($validated['newUserTeamId']);
+                if ($team) {
+                    $team->members()->attach($user->id, ['role' => $validated['newUserTeamRole']]);
+                    $user->update(['current_team_id' => $team->id]);
+                    $teamName = $team->name;
+                }
+            } else {
+                $personalTeam = Team::create([
+                    'name' => $user->name . "'s Fleet",
+                    'is_personal' => true,
+                    'status' => 'approved',
+                    'created_by' => $user->id,
+                ]);
+                $personalTeam->members()->attach($user->id, ['role' => \App\Enums\TeamRole::Owner->value]);
+                $user->update(['current_team_id' => $personalTeam->id]);
+                $teamName = $personalTeam->name;
+            }
+
+            if ($this->sendInviteEmail) {
+                $user->notify(new PlatformUserInvitation(
+                    temporaryPassword: $plainPassword,
+                    assignedTeam: $teamName,
+                    invitedByName: Auth::user()->name,
+                ));
+            }
+
+            AuditLog::record('admin.user_created', $user, [
+                'system_role' => $validated['newUserRole'],
+                'account_type' => $validated['newUserAccountType'],
+                'team_id' => $validated['newUserTeamId'],
+            ]);
+        });
+
+        $this->showCreateModal = false;
+        Flux::toast(variant: 'success', text: __('User account created and invited successfully.'));
     }
 
     public function openEditUser(int $id): void
@@ -109,6 +227,11 @@ new class extends Component {
         <div>
             <flux:heading size="xl">{{ __('User & Account Directory') }}</flux:heading>
             <flux:subheading>{{ __('Oversee registered individuals, organization personnel, and MicroMek platform staff.') }}</flux:subheading>
+        </div>
+        <div>
+            <flux:button variant="primary" icon="user-plus" wire:click="openCreateUser">
+                {{ __('Add / Invite User') }}
+            </flux:button>
         </div>
     </div>
 
@@ -216,6 +339,64 @@ new class extends Component {
     <div>
         {{ $this->users->links() }}
     </div>
+
+    <!-- Create / Invite User Modal -->
+    <flux:modal wire:model="showCreateModal" name="create-user-modal" class="max-w-lg">
+        <form wire:submit="createUser" class="space-y-4">
+            <div>
+                <flux:heading size="lg">{{ __('Add / Invite New User') }}</flux:heading>
+                <flux:subheading>{{ __('Register an individual user, fleet member, or MicroMek team staff.') }}</flux:subheading>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <flux:input wire:model="newUserName" label="Full Name" placeholder="e.g. Kondwani Phiri" required />
+                <flux:input wire:model="newUserEmail" type="email" label="Email Address" placeholder="user@example.com" required />
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <flux:input wire:model="newUserPhone" label="Phone Number (Optional)" placeholder="+265 999 123 456" />
+                <flux:select wire:model="newUserRole" label="Platform System Role" required>
+                    <flux:select.option value="customer">Customer / Member</flux:select.option>
+                    <flux:select.option value="micromek_staff">MicroMek Operations Staff</flux:select.option>
+                    @if (auth()->user()->isSuperAdmin())
+                        <flux:select.option value="super_admin">MicroMek Super Admin</flux:select.option>
+                    @endif
+                </flux:select>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <flux:select wire:model.live="newUserAccountType" label="Account Type" required>
+                    <flux:select.option value="individual">Individual</flux:select.option>
+                    <flux:select.option value="organization">Organization</flux:select.option>
+                </flux:select>
+
+                <flux:select wire:model="newUserTeamRole" label="Team Role">
+                    <flux:select.option value="member">Member / Driver</flux:select.option>
+                    <flux:select.option value="admin">Administrator</flux:select.option>
+                </flux:select>
+            </div>
+
+            <div>
+                <flux:select wire:model="newUserTeamId" label="Assign to Commercial Organization (Optional)">
+                    <flux:select.option value="">None (Personal Fleet)</flux:select.option>
+                    @foreach ($this->organizations as $org)
+                        <flux:select.option value="{{ $org->id }}">{{ $org->name }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+            </div>
+
+            <flux:input wire:model="newUserPassword" type="password" label="Temporary Password (Optional)" placeholder="Leave blank to auto-generate secure password" />
+
+            <div class="pt-1">
+                <flux:checkbox wire:model="sendInviteEmail" label="Send invitation email with login credentials" />
+            </div>
+
+            <div class="flex justify-end gap-2 pt-3 border-t border-zinc-200 dark:border-zinc-800">
+                <flux:button variant="ghost" wire:click="$set('showCreateModal', false)">Cancel</flux:button>
+                <flux:button type="submit" variant="primary">Create & Invite User</flux:button>
+            </div>
+        </form>
+    </flux:modal>
 
     <!-- Edit User Modal -->
     <flux:modal wire:model="showEditModal" name="edit-user-modal" class="max-w-md">
