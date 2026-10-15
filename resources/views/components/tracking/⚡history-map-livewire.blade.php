@@ -2,8 +2,10 @@
 
 use App\Models\LocationHistory;
 use App\Models\Vehicle;
+use Flux\Flux;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -13,10 +15,15 @@ new class extends Component {
 
     public function mount(): void
     {
-        $this->selectedDate = now()->format('Y-m-d');
         $first = $this->vehicles->first();
         if ($first) {
             $this->selectedVehicleId = $first->id;
+            $dates = $this->availableDates;
+            if (! empty($dates)) {
+                $this->selectedDate = $dates[0]['date'];
+            } else {
+                $this->selectedDate = now()->format('Y-m-d');
+            }
         }
     }
 
@@ -38,13 +45,41 @@ new class extends Component {
     }
 
     #[Computed]
-    public function historyPoints()
+    public function availableDates(): array
     {
         if (! $this->selectedVehicleId) {
             return [];
         }
 
-        $date = Carbon::parse($this->selectedDate);
+        return LocationHistory::query()
+            ->where('vehicle_id', $this->selectedVehicleId)
+            ->selectRaw('DATE(recorded_at) as record_date, count(*) as pings_count')
+            ->groupBy('record_date')
+            ->orderByDesc('record_date')
+            ->get()
+            ->map(function ($row) {
+                $dateObj = Carbon::parse($row->record_date);
+                $isToday = $dateObj->isToday();
+                $isYesterday = $dateObj->isYesterday();
+                $prefix = $isToday ? 'Today, ' : ($isYesterday ? 'Yesterday, ' : '');
+
+                return [
+                    'date' => $dateObj->format('Y-m-d'),
+                    'label' => $prefix . $dateObj->format('M d, Y') . " ({$row->pings_count} pings)",
+                    'count' => (int) $row->pings_count,
+                ];
+            })
+            ->toArray();
+    }
+
+    #[Computed]
+    public function historyPoints()
+    {
+        if (! $this->selectedVehicleId || empty($this->selectedDate)) {
+            return [];
+        }
+
+        $date = Carbon::parse($this->selectedDate)->format('Y-m-d');
 
         return LocationHistory::query()
             ->where('vehicle_id', $this->selectedVehicleId)
@@ -62,12 +97,147 @@ new class extends Component {
 
     public function updatedSelectedVehicleId(): void
     {
+        $dates = $this->availableDates;
+        if (! empty($dates)) {
+            $this->selectedDate = $dates[0]['date'];
+        } else {
+            $this->selectedDate = '';
+        }
+
         $this->dispatch('historyDataUpdated', points: $this->historyPoints);
     }
 
     public function updatedSelectedDate(): void
     {
         $this->dispatch('historyDataUpdated', points: $this->historyPoints);
+    }
+
+    public function exportCsv()
+    {
+        if (! $this->selectedVehicleId || empty($this->selectedDate)) {
+            Flux::toast(variant: 'warning', text: __('Please select a vehicle and a recorded date to export.'));
+            return null;
+        }
+
+        $vehicle = Vehicle::find($this->selectedVehicleId);
+        $plate = $vehicle ? Str::slug($vehicle->plate_number) : 'vehicle';
+        $date = Carbon::parse($this->selectedDate)->format('Y-m-d');
+
+        $records = LocationHistory::query()
+            ->where('vehicle_id', $this->selectedVehicleId)
+            ->whereDate('recorded_at', $date)
+            ->orderBy('recorded_at', 'asc')
+            ->with('device')
+            ->get();
+
+        if ($records->isEmpty()) {
+            Flux::toast(variant: 'warning', text: __('No telemetry records found to export for this date.'));
+            return null;
+        }
+
+        $fileName = "telemetry_{$plate}_{$this->selectedDate}.csv";
+
+        return response()->streamDownload(function () use ($records) {
+            $handle = fopen('php://output', 'w');
+
+            // UTF-8 BOM for Excel compatibility
+            fprintf($handle, chr(0xEF).chr(0xBB).chr(0xBF));
+
+            fputcsv($handle, [
+                'Ping #',
+                'Recorded At',
+                'Latitude',
+                'Longitude',
+                'Speed (km/h)',
+                'Heading (deg)',
+                'Altitude (m)',
+                'Accuracy (m)',
+                'Satellites',
+                'Battery (%)',
+                'Device ID',
+            ]);
+
+            foreach ($records as $index => $r) {
+                fputcsv($handle, [
+                    $index + 1,
+                    $r->recorded_at?->toIso8601String() ?? '',
+                    $r->latitude,
+                    $r->longitude,
+                    $r->speed ?? 0,
+                    $r->heading ?? 0,
+                    $r->altitude ?? '',
+                    $r->accuracy ?? '',
+                    $r->satellites ?? '',
+                    $r->battery ?? '',
+                    $r->device?->device_id ?? '',
+                ]);
+            }
+
+            fclose($handle);
+        }, $fileName, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"{$fileName}\"",
+        ]);
+    }
+
+    public function exportJson()
+    {
+        if (! $this->selectedVehicleId || empty($this->selectedDate)) {
+            Flux::toast(variant: 'warning', text: __('Please select a vehicle and a recorded date to export.'));
+            return null;
+        }
+
+        $vehicle = Vehicle::find($this->selectedVehicleId);
+        $plate = $vehicle ? Str::slug($vehicle->plate_number) : 'vehicle';
+        $date = Carbon::parse($this->selectedDate)->format('Y-m-d');
+
+        $records = LocationHistory::query()
+            ->where('vehicle_id', $this->selectedVehicleId)
+            ->whereDate('recorded_at', $date)
+            ->orderBy('recorded_at', 'asc')
+            ->with('device')
+            ->get();
+
+        if ($records->isEmpty()) {
+            Flux::toast(variant: 'warning', text: __('No telemetry records found to export for this date.'));
+            return null;
+        }
+
+        $fileName = "telemetry_{$plate}_{$this->selectedDate}.json";
+
+        $data = [
+            'vehicle' => [
+                'id' => $vehicle?->id,
+                'plate_number' => $vehicle?->plate_number,
+                'name' => $vehicle?->name,
+                'make' => $vehicle?->make,
+                'model' => $vehicle?->model,
+                'year' => $vehicle?->year,
+            ],
+            'query_date' => $this->selectedDate,
+            'total_pings' => $records->count(),
+            'exported_at' => now()->toIso8601String(),
+            'records' => $records->map(fn ($r, $idx) => [
+                'ping_number' => $idx + 1,
+                'recorded_at' => $r->recorded_at?->toIso8601String(),
+                'latitude' => (float) $r->latitude,
+                'longitude' => (float) $r->longitude,
+                'speed' => (float) ($r->speed ?? 0),
+                'heading' => (float) ($r->heading ?? 0),
+                'altitude' => $r->altitude !== null ? (float) $r->altitude : null,
+                'accuracy' => $r->accuracy !== null ? (float) $r->accuracy : null,
+                'satellites' => $r->satellites !== null ? (int) $r->satellites : null,
+                'battery' => $r->battery !== null ? (float) $r->battery : null,
+                'device_id' => $r->device?->device_id,
+            ])->toArray(),
+        ];
+
+        return response()->streamDownload(function () use ($data) {
+            echo json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        }, $fileName, [
+            'Content-Type' => 'application/json; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"{$fileName}\"",
+        ]);
     }
 }; ?>
 
@@ -80,7 +250,7 @@ new class extends Component {
     </div>
 
     <!-- Controls -->
-    <div class="flex flex-col sm:flex-row gap-4 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
+    <div class="flex flex-col md:flex-row items-stretch md:items-end gap-4 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-xs">
         <div class="flex-1">
             <flux:select wire:model.live="selectedVehicleId" label="Select Vehicle">
                 @foreach ($this->vehicles as $v)
@@ -90,8 +260,26 @@ new class extends Component {
                 @endforeach
             </flux:select>
         </div>
-        <div class="w-full sm:w-64">
-            <flux:input type="date" wire:model.live="selectedDate" label="Playback Date" />
+        <div class="w-full md:w-80">
+            <flux:select wire:model.live="selectedDate" label="Recorded Journey Date">
+                @forelse ($this->availableDates as $item)
+                    <flux:select.option value="{{ $item['date'] }}">
+                        {{ $item['label'] }}
+                    </flux:select.option>
+                @empty
+                    <flux:select.option value="" disabled>
+                        No recorded telemetry dates
+                    </flux:select.option>
+                @endforelse
+            </flux:select>
+        </div>
+        <div class="flex items-center gap-2 shrink-0 pb-0.5">
+            <flux:button variant="subtle" icon="arrow-down-tray" wire:click="exportCsv" :disabled="empty($this->historyPoints)" title="Export telemetry points as CSV spreadsheet">
+                {{ __('Export CSV') }}
+            </flux:button>
+            <flux:button variant="subtle" icon="code-bracket" wire:click="exportJson" :disabled="empty($this->historyPoints)" title="Export telemetry records as JSON">
+                {{ __('Export JSON') }}
+            </flux:button>
         </div>
     </div>
 
@@ -499,7 +687,11 @@ new class extends Component {
                     </div>
                 @empty
                     <div class="p-6 text-center text-xs text-zinc-500 rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700">
-                        No recorded telemetry points found for this vehicle on {{ $selectedDate }}.
+                        @if (! empty($selectedDate))
+                            {{ __('No recorded telemetry points found for this vehicle on :date.', ['date' => \Illuminate\Support\Carbon::parse($selectedDate)->format('M d, Y')]) }}
+                        @else
+                            {{ __('No recorded telemetry dates available for this vehicle.') }}
+                        @endif
                     </div>
                 @endforelse
             </div>
